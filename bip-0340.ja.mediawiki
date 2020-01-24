@@ -1,0 +1,405 @@
+<pre>
+  BIP: 340
+  Title: Schnorr Signatures for secp256k1
+  Author: Pieter Wuille <pieter.wuille@gmail.com>
+          Jonas Nick <Jonas Nick <jonasd.nick@gmail.com>
+          Tim Ruffing <crypto@timruffing.de>
+  Comments-Summary: No comments yet.
+  Comments-URI: https://github.com/bitcoin/bips/wiki/Comments:BIP-0340
+  Status: Draft
+  Type: Standards Track
+  License: BSD-2-Clause
+  Created: 2020-01-19
+  Post-History: 2018-07-06: https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2018-July/016203.html [bitcoin-dev] Schnorr signatures BIP
+</pre>
+
+== Introduction ==
+
+=== Abstract ===
+
+This document proposes a standard for 64-byte Schnorr signatures over the elliptic curve ''secp256k1''.
+
+この文書は、楕円曲線 ''secp256k1'' での 64バイトのシュノア署名の標準を提案する。
+
+=== Copyright ===
+
+This document is licensed under the 2-clause BSD license.
+
+=== Motivation ===
+
+Bitcoin has traditionally used
+[https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm ECDSA] signatures over the [https://www.secg.org/sec2-v2.pdf secp256k1 curve] with [https://en.wikipedia.org/wiki/SHA-2 SHA256] hashes for authenticating
+transactions. These are [https://www.secg.org/sec1-v2.pdf standardized], but have a number of downsides
+compared to [http://publikationen.ub.uni-frankfurt.de/opus4/files/4280/schnorr.pdf Schnorr signatures] over the same curve:
+
+Bitcoin は伝統的にトランザクションの認証には [https://en.wikipedia.org/wiki/SHA-2 SHA256] ハッシュに対する [https://www.secg.org/sec2-v2.pdf secp256k1曲線] の [https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm ECDSA] 署名を用いてきたが、これは同じ曲線での [http://publikationen.ub.uni-frankfurt.de/opus4/files/4280/schnorr.pdf シュノア署名] に比べていくつかの欠点がある:
+
+* '''Provable security''': Schnorr signatures are provably secure. In more detail, they are ''strongly unforgeable under chosen message attack (SUF-CMA)''<ref>Informally, this means that without knowledge of the secret key but given valid signatures of arbitrary messages, it is not possible to come up with further valid signatures.</ref> [https://www.di.ens.fr/~pointche/Documents/Papers/2000_joc.pdf in the random oracle model assuming the hardness of the elliptic curve discrete logarithm problem (ECDLP)] and [http://www.neven.org/papers/schnorr.pdf in the generic group model assuming variants of preimage and second preimage resistance of the used hash function]<ref>A detailed security proof in the random oracle model, which essentially restates [https://www.di.ens.fr/~pointche/Documents/Papers/2000_joc.pdf the original security proof by Pointcheval and Stern] more explicitly, can be found in [https://eprint.iacr.org/2016/191 a paper by Kiltz, Masny and Pan]. All these security proofs assume a variant of Schnorr signatures that use ''(e,s)'' instead of ''(R,s)'' (see Design above). Since we use a unique encoding of ''R'', there is an efficiently computable bijection that maps ''(R,s)'' to ''(e,s)'', which allows to convert a successful SUF-CMA attacker for the ''(e,s)'' variant to a successful SUF-CMA attacker for the ''(R,s)'' variant (and vice-versa). Furthermore, the proofs consider a variant of Schnorr signatures without key prefixing (see Design above), but it can be verified that the proofs are also correct for the variant with key prefixing. As a result, all the aforementioned security proofs apply to the variant of Schnorr signatures proposed in this document.</ref>. In contrast, the [https://nbn-resolving.de/urn:nbn:de:hbz:294-60803 best known results for the provable security of ECDSA] rely on stronger assumptions.
+
+* '''証明可能なセキュリティ''': シュノア署名は証明可能に安全である。詳細にいえば、[https://www.di.ens.fr/~pointche/Documents/Papers/2000_joc.pdf 楕円曲線の離散対数問題(ECDLP)の困難性の仮定によるランダムオラクルモデル]と[http://www.neven.org/papers/schnorr.pdf 使用するハッシュ関数の preimage 及び second preimage 耐性の仮定による generic group model]<ref>ランダムオラクルモデルの安全性(より明確には[https://www.di.ens.fr/~pointche/Documents/Papers/2000_joc.pdf Pointcheval と Stern による証明]と言ってもよい)についての詳細な証明は、[https://eprint.iacr.org/2016/191 Kiltz, Masny and Pan の論文] で見れる。これら全ての安全性の証明は、''(R,s)'' の代わりに ''(e,s)'' を用いたシュノア署名の変形(上の「設計」を参照)を仮定している。我々は ''R'' の独自のエンコードを利用しているが、''(R,s)'' から ''(e,s)'' への効率的に計算可能な全単射があるので、''(e,s)'' 形式へ対する SUF_CMA 攻撃の成功は、''(R,s)'' 形式へ対する成功への変換できる(逆も可)。さらに言えば、それらの証明は key prefixing (「設計」参照) をしないシュノア署名形式を検討対象としているが、key prefixing をしている形式でも正しいと検証できる。結論としては、前述の全ての安全性の証明は、この文書で提案しているシュノア署名の形式に対して適用できる。</ref>の下で ''メッセージ選択攻撃に対する強偽造耐性(strongly unforgeable under chosen message attack (SUF-CMA))'' を備えている<ref>簡単にいうと、秘密鍵は知らないが任意のメッセージに対する正しい署名を知っている場合でも、別の正しい署名を作成することができないということ。 </ref>。対照的に、[https://nbn-resolving.de/urn:nbn:de:hbz:294-60803 ECDSA の証明可能な安全性に対するよく知られた結果]は強い仮定をおいている。
+
+* '''Non-malleability''': The SUF-CMA security of Schnorr signatures implies that they are non-malleable. On the other hand, ECDSA signatures are inherently malleable<ref>If ''(r,s)'' is a valid ECDSA signature for a given message and key, then ''(r,n-s)'' is also valid for the same message and key. If ECDSA is restricted to only permit one of the two variants (as Bitcoin does through a policy rule on the network), it can be [https://nbn-resolving.de/urn:nbn:de:hbz:294-60803 proven] non-malleable under stronger than usual assumptions.</ref>; a third party without access to the secret key can alter an existing valid signature for a given public key and message into another signature that is valid for the same key and message. This issue is discussed in [[bip-0062.mediawiki|BIP62]] and [[bip-0146.mediawiki|BIP146]].
+
+* '''非展性''': シュノア署名の SUF-CMA 安全性は非展性であることを含んでいる。これに対して、ECDSA 署名は本来的に展性を持つ<ref>与えられたメッセージと鍵に対して ''(r,s)'' が正しい ECDSA 署名であれば、同じメッセージと鍵に対して ''(r,n-s)'' もまた正しい署名である。もし ECDSA を二つの署名のうち一方のみを許すように制限すると(ビットコインはネットワークのポリシールールとしてこれを行っている)、通常よりも強い仮定の下で非展性になると[https://nbn-resolving.de/urn:nbn:de:hbz:294-60803 証明]できる。</ref>。つまり、秘密鍵にアクセスできない第三者が、与えられた公開鍵とメッセージに対する既知の正しい署名を、同一の鍵とメッセージに対する別の正しい署名へと変形することができる。この問題は [[bip-0062.mediawiki|BIP62]] および [[bip-0146.mediawiki|BIP146]] で議論されている。
+
+
+* '''Linearity''': Schnorr signatures provide a simple and efficient method that enables multiple collaborating parties to produce a signature that is valid for the sum of their public keys. This is the building block for various higher-level constructions that improve efficiency and privacy, such as multisignatures and others (see Applications below).
+
+* '''線型''': シュノア署名は、複数人の公開鍵の総和に対する正しい署名の作成を行う簡単で効率的な方法を提供する。マルチシグネチャなど(下の「アプリケーション」を参照)の効率とプライバシーを改善する様々な高レベルの仕組みを作るための部品となる。
+
+
+For all these advantages, there are virtually no disadvantages, apart
+from not being standardized. This document seeks to change that. As we
+propose a new standard, a number of improvements not specific to Schnorr signatures can be
+made:
+
+これらの優れた点があるのに対し、標準化されていないこと以外に実質的な劣ったところは無い。
+この文書ではこの状況を変えるように努める。
+我々の新たな標準を提案により、シュノア署名以外も含めたいくつかの改善を果たす:
+
+* '''Signature encoding''': Instead of using [https://en.wikipedia.org/wiki/X.690#DER_encoding DER]-encoding for signatures (which are variable size, and up to 72 bytes), we can use a simple fixed 64-byte format.
+
+* '''署名のエンコード''': 署名に[https://en.wikipedia.org/wiki/X.690#DER_encoding DER]符号(最大72バイトの可変サイズになる)を使う代わりに、単純な 64バイト固定長の形式を使う。
+
+* '''Public key encoding''': Instead of using ''compressed'' 33-byte encodings of elliptic curve points which are common in Bitcoin today, public keys in this proposal are encoded as 32 bytes.
+
+* '''公開鍵のエンコード''': 今日のビットコインで一般に使われている楕円曲線上の点の33バイト''圧縮''符号の代わりに、この提案では公開鍵を 32バイトでエンコードする。
+
+* '''Batch verification''': The specific formulation of ECDSA signatures that is standardized cannot be verified more efficiently in batch compared to individually, unless additional witness data is added. Changing the signature scheme offers an opportunity to address this.
+
+* '''バッチ検証''': 標準化されている ECDSA 署名の形式は、付加的な witness データを加えなければ、個別に検証するよりも効率的にバッチ処理することができない。署名方式を変えることで、この機能を含める機会を提供する。
+
+* '''Completely specified''': To be safe for usage in consensus systems, the verification algorithm must be completely specified at the byte level. This guarantees that nobody can construct a signature that is valid to some verifiers but not all. This is traditionally not a requirement for digital signature schemes, and the lack of exact specification for the DER parsing of ECDSA signatures has caused problems for Bitcoin [https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2015-July/009697.html in the past], needing [[bip-0066.mediawiki|BIP66]] to address it. In this document we aim to meet this property by design. For batch verification, which is inherently non-deterministic as the verifier can choose their batches, this property implies that the outcome of verification may only differ from individual verifications with negligible probability, even to an attacker who intentionally tries to make batch- and non-batch verification differ.
+
+* '''完全な仕様化''': コンセンサスシステムの利用を安全にするために、検証アルゴリズムをバイトレベルで完全に仕様化する。
+これにより、誰もある検証者にとっては正しいが他の検証者にとっては正しくないような署名を作れないようにする。
+これは従来のデジタル署名スキームでは必要とされず、ECDSA 署名を DER で展開する際の厳格な仕様の欠落はビットコインで[https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2015-July/009697.html かつて]問題となり、[[bip-0066.mediawiki|BIP66]] による修正が必要となった。この文書で、我々は設計レベルでこの特性を持たせることを企図した。バッチ検証は検証者がどのようなバッチを選ぶかが不明なので本質的に非決定的であるが、この特性は暗黙的に、攻撃者が意図的なバッチと非バッチ検証の差異を作ったとしても、バッチ検証は個別の検証に比べて無視できる確率しか違わないことを含む(?)。
+
+By reusing the same curve and hash function as Bitcoin uses for ECDSA, we are able to retain existing mechanisms for choosing secret and public keys, and we avoid introducing new assumptions about the security of elliptic curves and hash functions.
+
+ビットコインの ECDSA と同じ曲線およびハッシュ関数を用いることで、既存の秘密鍵および公開鍵の選択手法をそのまま使えるようにし、また楕円曲線およびハッシュ関数のセキュリティ上の新たな仮定を導入することを避けた。
+
+
+== Description ==
+
+We first build up the algebraic formulation of the signature scheme by
+going through the design choices. Afterwards, we specify the exact
+encodings and operations.
+
+まず初めに、設計の選択をたどることで署名方法の代数的形式を構築する。
+その後に、正確なエンコードと演算を規定する。
+
+=== Design ===
+
+'''Schnorr signature variant''' Elliptic Curve Schnorr signatures for message ''m'' and public key ''P'' generally involve a point ''R'', integers ''e'' and ''s'' picked by the signer, and the base point ''G'' which satisfy ''e = hash(R || m)'' and ''s⋅G = R + e⋅P''. Two formulations exist, depending on whether the signer reveals ''e'' or ''R'':
+# Signatures are pairs ''(e, s)'' that satisfy ''e = hash(s⋅G - e⋅P || m)''. This variant avoids minor complexity introduced by the encoding of the point ''R'' in the signature (see paragraphs "Encoding R and public key point P" and "Implicit Y coordinates" further below in this subsection). Moreover, revealing ''e'' instead of ''R'' allows for potentially shorter signatures: Whereas an encoding of ''R'' inherently needs about 32 bytes, the hash ''e'' can be tuned to be shorter than 32 bytes, and [http://www.neven.org/papers/schnorr.pdf a short hash of only 16 bytes suffices to provide SUF-CMA security at the target security level of 128 bits]. However, a major drawback of this optimization is that finding collisions in a short hash function is easy. This complicates the implementation of secure signing protocols in scenarios in which a group of mutually distrusting signers work together to produce a single joint signature (see Applications below). In these scenarios, which are not captured by the SUF-CMA model due its assumption of a single honest signer, a promising attack strategy for malicious co-signers is to find a collision in the hash function in order to obtain a valid signature on a message that an honest co-signer did not intent to sign.
+# Signatures are pairs ''(R, s)'' that satisfy ''s⋅G = R + hash(R || m)⋅P''. This supports batch verification, as there are no elliptic curve operations inside the hashes. Batch verification enables significant speedups.
+
+'''シュノア署名のバリエーション''' メッセージ ''m'' と公開鍵 ''P'' に対する楕円曲線のシュノア署名は、ベースポイント ''G'' を用いて、''e = hash(R || m)'' および ''s⋅G = R + e⋅P'' を満たすように署名者の選んだ点 ''R'', 整数 ''e'', 整数 ''s'' から成る。署名者が ''e'' か ''R'' のどちらかを晒すかによって二つの式がある:
+# ''e = hash(s⋅G - e⋅P || m)'' を見たす ''(e, s)'' ペアを署名とする。この形式は、署名中の点 ''R'' のエンコード("「R と公開鍵点Pのエンコード」および「暗黙的な Y 座標」の節を参照)による副次的な複雑性を回避する。
+さらに、''R'' の代わりに ''e'' を公開することで、潜在的に小さな署名となる: ''R'' のエンコードは最低でも 32バイト必要だが、''e'' のハッシュ値は 32バイトより小さくでき、[http://www.neven.org/papers/schnorr.pdf 128ビットの SUF-CMA セキュリティレベルを得るにはわずか16バイトの短かいハッシュ値で十分である]。しかしながら、この最適化には短かいハッシュ関数の衝突を見つけるのは簡単であるというの大きな欠点がある。
+このことは、互いに信頼できない署名者のグループが一つの合成署名を生成するシナリオで(下の「アプリケーション」参照)、安全な署名プロトコルの実装を難しくする。これらのシナリオでは、独りの信頼できる署名者を仮定する SUF-CMA モデルは成り立たず、悪意ある署名者が正直な署名者が署名しないメッセージに対する正しい署名を得るための promissing attack 戦略はハッシュ関数の衝突を見つけることです(?)。
+# ''s⋅G = R + hash(R || m)⋅P'' を満たす ''(R, s)'' ペアを署名とする。この方式はハッシュ中に楕円曲線演算を含まないので、バッチ検証をサポートします。バッチ検証は劇的な高速化を可能にします。
+
+
+[[File:bip-0340/speedup-batch.png|center|frame|This graph shows the ratio between the time it takes to verify ''n'' signatures individually and to verify a batch of ''n'' signatures. This ratio goes up logarithmically with the number of signatures, or in other words: the total time to verify ''n'' signatures grows with ''O(n / log n)''.]]
+
+Since we would like to avoid the fragility that comes with short hashes, the ''e'' variant does not provide significant advantages. We choose the ''R''-option, which supports batch verification. 
+
+短かいハッシュ値による脆弱性は避けたいので、''e'' 方式には特にアドバンテージは無い。我々はバッチ検証もサポートする ''R'' 方式を選んだ。
+
+'''Key prefixing''' Using the verification rule above directly makes Schnorr signatures vulnerable to "related-key attacks" in which a third party can convert a signature ''(R, s)'' for public key ''P'' into a signature ''(R, s + a⋅hash(R || m))'' for public key ''P + a⋅G'' and the same message ''m'', for any given additive tweak ''a'' to the signing key. This would render signatures insecure when keys are generated using [[bip-0032.mediawiki#public-parent-key--public-child-key|BIP32's unhardened derivation]] and other methods that rely on additive tweaks to existing keys such as Taproot.
+
+'''Key prefixing''' 上述した検証ルールを用いると、シュノア署名は "related-key attacks" の脆弱性が生じる。つまり、第三者がメッセージ ''m'' に対する公開鍵 ''P'' の署名 ''(R, s)'' を、適当な秘密鍵 ''a'' を使って、公開鍵 ''P + a⋅G'' の署名 ''(R, s + a⋅hash(R || m))'' へと変換することができてしまう。このことは、[[bip-0032.mediawiki#public-parent-key--public-child-key|BIP32 の非harden派生]] した鍵や、Taproot のように既存の鍵に適当な秘密鍵を加算して生成する鍵を用いた署名を危険にする。
+
+To protect against these attacks, we choose ''key prefixed''<ref>A limitation of committing to the public key (rather than to a short hash of it, or not at all) is that it removes the ability for public key recovery or verifying signatures against a short public key hash. These constructions are generally incompatible with batch verification.</ref> Schnorr signatures; changing the equation to ''s⋅G = R + hash(R || P || m)⋅P''. [https://eprint.iacr.org/2015/1135.pdf It can be shown] that key prefixing protects against related-key attacks with additive tweaks. In general, key prefixing increases robustness in multi-user settings, e.g., it seems to be a requirement for proving the MuSig multisignature scheme secure (see Applications below).
+
+これらの攻撃から保護するため、''key prefixed''<ref>公開鍵の復元および短かい公開鍵ハッシュ値への署名の検証をできなくするような公開鍵への制約(rather than to a short hash of it, or not at all)。これらの構成は一般的にバッチ検証と互換性が無くなる。</ref>シュノア署名を選択した。具体的には、等式を ''s⋅G = R + hash(R || P || m)⋅P'' へと変える。key prefixing が additive tweaks による related-key 攻撃から守ることは [https://eprint.iacr.org/2015/1135.pdf 示すことができる]。一般的には、key prefixing は複数ユーザー環境の冗長性を高める。たとえば、MuSig マルチシグネチャ方式の安全性の証明に必要なようである(下の「アプリケーション」参照)。
+
+We note that key prefixing is not strictly necessary for transaction signatures as used in Bitcoin currently, because signed transactions indirectly commit to the public keys already, i.e., ''m'' contains a commitment to ''pk''. However, this indirect commitment should not be relied upon because it may change with proposals such as SIGHASH_NOINPUT ([[bip-0118.mediawiki|BIP118]]), and would render the signature scheme unsuitable for other purposes than signing transactions, e.g., [https://bitcoin.org/en/developer-reference#signmessage signing ordinary messages].
+
+現在のビットコインで使われているトランザクションの署名では、署名済トランザクションは既に間接的に公開鍵に紐付いている(たとえば、''m'' は ''pk'' を含んでいる)ので、 key prefixing が厳密に必要なわけではないことを注意しておく。しかしながら、SIGHASH_NOINPUT ([[bip-0118.mediawiki|BIP118]]) のような提案によって変わりうるので、この間接的な関与に信頼はおけない。
+
+
+'''Encoding R and public key point P''' There exist several possibilities for encoding elliptic curve points:
+# Encoding the full X and Y coordinates of ''P'' and ''R'', resulting in a 64-byte public key and a 96-byte signature.
+# Encoding the full X coordinate and one bit of the Y coordinate to determine one of the two possible Y coordinates. This would result in 33-byte public keys and 65-byte signatures.
+# Encoding only the X coordinate, resulting in 32-byte public keys and 64-byte signatures.
+
+'''R と 公開鍵の点 P のエンコード''' 楕円曲線上の点をエンコードする方法はいくつかある:
+# ''P'' と ''R'' の完全な X,Y 座標をエンコードする。この場合、公開鍵は 64バイト、署名は 96バイトになる。
+# 完全な X 座標と、その X 座標に対応する 2つの Y 座標のうち一つに決定するための 1ビット値をエンコードする。この場合、公開鍵は 33バイト、署名は 65バイトになる。
+# X座標のみをエンコードする。この場合、公開鍵は 32バイト、署名は 64バイトになる。
+
+Using the first option would be slightly more efficient for verification (around 10%), but we prioritize compactness, and therefore choose option 3.
+
+最初のやり方は検証が効率的(およそ10%)になるが、我々は小ささを優先したいので、3つ目のやり方を選んだ。
+
+'''Implicit Y coordinates''' In order to support efficient verification and batch verification, the Y coordinate of ''P'' and of ''R'' cannot be ambiguous (every valid X coordinate has two possible Y coordinates). We have a choice between several options for symmetry breaking:
+# Implicitly choosing the Y coordinate that is in the lower half.
+# Implicitly choosing the Y coordinate that is even<ref>Since ''p'' is odd, negation modulo ''p'' will map even numbers to odd numbers and the other way around. This means that for a valid X coordinate, one of the corresponding Y coordinates will be even, and the other will be odd.</ref>.
+# Implicitly choosing the Y coordinate that is a quadratic residue (has a square root modulo the field size, or "is a square" for short)<ref>A product of two numbers is a square when either both or none of the factors are squares. As ''-1'' is not a square modulo secp256k1's field size ''p'', and the two Y coordinates corresponding to a given X coordinate are each other's negation, this means exactly one of the two must be a square.</ref>.
+
+'''暗黙的な Y 座標''' 効率的な検証およびバッチ検証をサポートするためには、''P'' と ''R'' の Y 座標は曖昧であってはならない(全ての正しい X 座標には二つの Y 座標が対応する)。対象性を破壊するためには、いくつかの方法の選択肢がある:
+# 小さい Y 座標を選択する。
+# 偶数の Y 座標を選択する。<ref>''p'' が偶数のときその負の剰余は奇数になり、奇数の時は偶数になる。つまり、正しい X 座標に対応する Y 座標の一つは偶数で、もう一つは奇数である。</ref>
+# 平方剰余(体のサイズを法とする平方根の剰余。単に "square" とも)の Y を選ぶ。<ref>二つの数の積が square となるのは、因数二つともに square であるか、またはどちらの因数も square で無い場合である。ある X に対する二つの Y の値は互いに負数であるが、ここで ''-1'' は secp256k のサイズ ''p'' の平方剰余ではないので、二つの Y のうちの一方は square である。(訳注: 楕円曲線の式は ''y^2 = x^3 + a*x + b (mod p)'' なので、ある ''x'' に対する二つの ''y'' は互いに負積になっている。これを ''a'', ''-a'' と置く。''a = (-a) * -1'' と書ける。ここで ''a'' が平方剰余とすると、その一つの因数 ''-1'' は平方剰余ではないので、もう一つの因数 ''-a'' もまた平方剰余ではない。同様に、''-a'' が平方剰余の場合には ''a'' は平方剰余ではない。つまり、ある点 ''x'' に対する二つの ''y'' 値のうち、一方は平方剰余で、もう一方は平方剰余ではない。ということ?)</ref>
+
+In the case of ''R'' the third option is slower at signing time but a bit faster to verify, as it is possible to directly compute whether the Y coordinate is a square when the points are represented in
+[https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates Jacobian coordinates] (a common optimization to avoid modular inverses
+for elliptic curve operations). The two other options require a possibly
+expensive conversion to affine coordinates first. This would even be the case if the sign or oddness were explicitly coded (option 2 in the list above). We therefore choose option 3.
+
+''R'' を晒す方式での三番目のやり方は署名は遅いが、[https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates Jacobian coordinates](楕円曲線での逆数の剰余を避けるための一般的な効率化手法)で座標を表現していれば、Y 座標が平方剰余かどうかを直接的に計算できるので、検証は速い。他の二つの方法は、潜在的に高価であるアフィン座標への変換が最初に必要となる。署名や oddness(奇数?) が明示的にエンコードされている場合(上のリストの二番目の選択肢)にも必要かもしれない。それゆえ、我々は三番目のやり方を選んだ。
+
+For ''P'' the speed of signing and verification does not significantly differ between any of the three options because affine coordinates of the point have to be computed anyway. For consistency reasons we choose the same option as for ''R''. The signing algorithm ensures that the signature is valid under the correct public key by negating the secret key if necessary.
+
+''P'' については結局のところアフィン座標の計算は必要なので、上記 3 つの方式で署名と検証の速度はさほど違わない。一貫性の観点から ''R'' と同じ方式を選んだ。必要であれば、秘密鍵を negate (負? 否定?)することで、正しい公開鍵の下で署名が合法であることを署名アルゴリズムで保障することができる。
+
+Implicit Y coordinates are not a reduction in security when expressed as the number of elliptic curve operations an attacker is expected to perform to compute the secret key. An attacker can normalize any given public key to a point whose Y coordinate is a square by negating the point if necessary. This is just a subtraction of field elements and not an elliptic curve operation<ref>This can be formalized by a simple reduction that reduces an attack on Schnorr signatures with implicit Y coordinates to an attack to Schnorr signatures with explicit Y coordinates. The reduction works by reencoding public keys and negating the result of the hash function, which is modeled as random oracle, whenever the challenge public key has an explicit Y coordinate that is not a square. A proof sketch can be found [https://medium.com/blockstream/reducing-bitcoin-transaction-sizes-with-x-only-pubkeys-f86476af05d7 here].</ref>.
+
+Y 座標を暗黙的にすることは、攻撃者が秘密鍵を計算するためにかかる楕円曲線演算の回数という意味でのセキュリティを損なわない。
+これは即ち field elements の引き算である<ref>これは、明示的な Y 座標におけるシュノア署名への攻撃に比べた場合の、暗黙的な Y 座標でのシュノア署名への攻撃で削減できること、と定式化できる。この削減は、公開鍵の再エンコードとハッシュ関数の結果を negate する際に行えるが、これらはランダムオラクルなので、チャレンジされる公開鍵は常に平方剰余でない明示的な Y 座標を持つ(?)。この証明のスケッチは [https://medium.com/blockstream/reducing-bitcoin-transaction-sizes-with-x-only-pubkeys-f86476af05d7 ここ] で見つかる。</ref>。
+
+'''Tagged Hashes''' Cryptographic hash functions are used for multiple purposes in the specification below and in Bitcoin in general. To make sure hashes used in one context can't be reinterpreted in another one, hash functions can be tweaked with a context-dependent tag name, in such a way that collisions across contexts can be assumed to be infeasible. Such collisions obviously can not be ruled out completely, but only for schemes using tagging with a unique name. As for other schemes collisions are at least less likely with tagging than without.
+
+'''タグ付きハッシュ''' 暗号学的なハッシュ関数は、下に示す仕様やビットコイン一般でいくつかの目的に使われる。あるコンテキストで使われたハッシュ値を別の場所で解釈されないようにするため、ハッシュ関数にコンテキスト依存のタグ名を付加することができる。こうしていれば、コンテキストを跨いだ衝突は不可能とみなすことができる。これらの衝突を完全に除外することは当然できないが、ユニークな名前のタグを用いたスキームならできる。タグ無しの他のスキームでも、せいぜいタグ付けと同程度の衝突回避にしかならない。
+
+For example, without tagged hashing a BIP340 signature could also be valid for a signature scheme where the only difference is that the arguments to the hash function are reordered. Worse, if the BIP340 nonce derivation function was copied or independently created, then the nonce could be accidentally reused in the other scheme leaking the secret key.
+
+たとえば、タグ無しのハッシュを使うと、BIP340 署名はハッシュ関数の引数の順序を変えただけの署名も有効となってしまう。さらに悪いことに、BIP340 のナンス派生関数がコピーされたり非独立的に作成されていたりすると、偶然ナンスが再利用される場合があり、秘密鍵の漏洩に繋がる。
+
+This proposal suggests to include the tag by prefixing the hashed data with ''SHA256(tag) || SHA256(tag)''. Because this is a 64-byte long context-specific constant and the ''SHA256'' block size is also 64 bytes, optimized implementations are possible (identical to SHA256 itself, but with a modified initial state). Using SHA256 of the tag name itself is reasonably simple and efficient for implementations that don't choose to use the optimization.
+
+このプロポーザルでは ''SHA256(tag) || SHA256(tag)'' をハッシュデータの先頭に付加することを提案する。これは64バイト固定長のコンテキスト特有の定数であり、''SHA256'' のブロックサイズもまた 64バイトなので、実装の最適化が可能である(SHA256 そのものだけでなく、修正された初期値でも)。タグ名の SHA256 を使うのはほどよくシンプルで、最適化しない実装でも効率的である。
+
+'''Final scheme''' As a result, our final scheme ends up using public key ''pk'' which is the X coordinate of a point ''P'' on the curve whose Y coordinate is a square and signatures ''(r,s)'' where ''r'' is the X coordinate of a point ''R'' whose Y coordinate is a square. The signature satisfies ''s⋅G = R + tagged_hash(r || pk || m)⋅P''.
+
+'''最終的なスキーム''' 以上の結果、我々の最終的なスキームは次のようになる。公開鍵 ''pk'' は Y 座標が平方剰余である曲線上の点 P の X 座標とし、Y 座標が平方剰余である点 ''R'' の X 座標 ''r'' と、''s⋅G = R + tagged_hash(r || pk || m)⋅P'' を見たる s から成る ''(r,s)'' を署名とする。
+
+=== Specification ===
+
+The following conventions are used, with constants as defined for [https://www.secg.org/sec2-v2.pdf secp256k1]:
+* Lowercase variables represent integers or byte arrays.
+** The constant ''p'' refers to the field size, ''0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F''.
+** The constant ''n'' refers to the curve order, ''0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141''.
+* Uppercase variables refer to points on the curve with equation ''y<sup>2</sup> = x<sup>3</sup> + 7'' over the integers modulo ''p''.
+** ''is_infinite(P)'' returns whether or not ''P'' is the point at infinity.
+** ''x(P)'' and ''y(P)'' are integers in the range ''0..p-1'' and refer to the X and Y coordinates of a point ''P'' (assuming it is not infinity).
+** The constant ''G'' refers to the base point, for which ''x(G) = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798'' and ''y(G) = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8''.
+** Addition of points refers to the usual [https://en.wikipedia.org/wiki/Elliptic_curve#The_group_law elliptic curve group operation].
+** [https://en.wikipedia.org/wiki/Elliptic_curve_point_multiplication Multiplication (⋅) of an integer and a point] refers to the repeated application of the group operation.
+* Functions and operations:
+** ''||'' refers to byte array concatenation.
+** The function ''x[i:j]'', where ''x'' is a byte array, returns a ''(j - i)''-byte array with a copy of the ''i''-th byte (inclusive) to the ''j''-th byte (exclusive) of ''x''.
+** The function ''bytes(x)'', where ''x'' is an integer, returns the 32-byte encoding of ''x'', most significant byte first.
+** The function ''bytes(P)'', where ''P'' is a point, returns ''bytes(x(P))''.
+** The function ''int(x)'', where ''x'' is a 32-byte array, returns the 256-bit unsigned integer whose most significant byte first encoding is ''x''.
+** The function ''is_square(x)'', where ''x'' is an integer, returns whether or not ''x'' is a quadratic residue modulo ''p''. Since ''p'' is prime, it is equivalent to the [https://en.wikipedia.org/wiki/Legendre_symbol Legendre symbol] ''(x / p) = x<sup>(p-1)/2</sup> mod p'' being equal to ''1''<ref>For points ''P'' on the secp256k1 curve it holds that ''y(P)<sup>(p-1)/2</sup> &ne; 0 mod p''.</ref>.
+** The function ''has_square_y(P)'', where ''P'' is a point, is defined as ''not is_infinite(P) and is_square(y(P))''<ref>For points ''P'' on the secp256k1 curve it holds that ''has_square_y(P) = not has_square_y(-P)''.</ref>.
+** The function ''lift_x(x)'', where ''x'' is an integer in range ''0..p-1'', returns the point ''P'' for which ''x(P) = x''<ref>
+    Given a candidate X coordinate ''x'' in the range ''0..p-1'', there exist either exactly two or exactly zero valid Y coordinates. If no valid Y coordinate exists, then ''x'' is not a valid X coordinate either, i.e., no point ''P'' exists for which ''x(P) = x''. The valid Y coordinates for a given candidate ''x'' are the square roots of ''c = x<sup>3</sup> + 7 mod p'' and they can be computed as ''y = &plusmn;c<sup>(p+1)/4</sup> mod p'' (see [https://en.wikipedia.org/wiki/Quadratic_residue#Prime_or_prime_power_modulus Quadratic residue]) if they exist, which can be checked by squaring and comparing with ''c''.
+</ref> and ''has_square_y(P)''<ref>
+    If ''P := lift_x(x)'' does not fail, then ''y := y(P) = c<sup>(p+1)/4</sup> mod p'' is square. Proof: If ''lift_x'' does not fail, ''y'' is a square root of ''c'' and therefore the [https://en.wikipedia.org/wiki/Legendre_symbol Legendre symbol] ''(c / p)'' is ''c<sup>(p-1)/2</sup> = 1 mod p''. Because the Legendre symbol ''(y / p)'' is ''y<sup>(p-1)/2</sup> mod p = c<sup>((p+1)/4)((p-1)/2)</sup> mod p = 1<sup>((p+1)/4)</sup> mod p = 1 mod p'', ''y'' is square.
+</ref>, or fails if no such point exists. The function ''lift_x(x)'' is equivalent to the following pseudocode:
+*** Let ''c = x<sup>3</sup> + 7 mod p''.
+*** Let ''y = c<sup>(p+1)/4</sup> mod p''.
+*** Fail if ''c &ne; y<sup>2</sup> mod p''.
+*** Return the unique point ''P'' such that ''x(P) = x'' and ''y(P) = y'', or fail if no such point exists.
+** The function ''point(x)'', where ''x'' is a 32-byte array, returns the point ''P = lift_x(int(x))''.
+** The function ''hash<sub>tag</sub>(x)'' where ''tag'' is a UTF-8 encoded tag name and ''x'' is a byte array returns the 32-byte hash ''SHA256(SHA256(tag) || SHA256(tag) || x)''.
+
+以下の変換を用いる。定数は [https://www.secg.org/sec2-v2.pdf secp256k1] で定義されている:
+* 小文字の変数は整数またはバイト列を表す。
+** 定数 ''p'' はフィールドサイズ。具体的には ''0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F''.
+** 定数 ''n'' は曲線のオーダー。具体的には ''0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141''.
+* 大文字の変数は ''p'' を法とする曲線 ''y<sup>2</sup> = x<sup>3</sup> + 7'' 上の点を表す。
+** ''is_infinite(P)'' は ''P'' が無限遠点かどうかを返す。
+** ''x(P)'' と ''y(P)'' は ''0..p-1'' 内の整数で、(無限遠ではない)点 ''P'' の X および Y 座標を示す。
+** 定数 ''G'' はベースポイント。具体的には、''x(G) = 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798'' かつ ''y(G) = 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8''.
+** 点の加算は [https://en.wikipedia.org/wiki/Elliptic_curve#The_group_law 楕円曲線上の群に対する演算] を参照。
+** [https://en.wikipedia.org/wiki/Elliptic_curve_point_multiplication 点に対する整数倍(演算子は ''⋅'') ] は、上記の加算を繰り返したもの。
+* 関数と演算:
+** ''||'' はバイト列の結合。
+** バイト列 ''x'' に対する ''x[i:j]'' 関数は、''x'' の ''i'' 番目のバイト(含む)から ''j'' 番目のバイト(含まない) までの ''(j - i)'' バイトを複製した配列を返す。
+** 整数 ''x'' に対する ''bytes(x)'' 関数は、''x'' のビッグエンディアンな 32バイトのバイト列を返す。
+** 点 ''P'' に対する ''bytes(P)'' 関数は、''bytes(x(P))'' を返す。
+** 32バイト列 ''x'' に対する ''int(x)'' 関数は、x をビッグエンディアンバイト列とみなした 256ビットの符号無し整数を返す。
+** 整数 ''x'' に対する ''is_square(x)'' 関数は、''x'' が ''p'' を法とする平方剰余かどうかを返す。''p'' は素数なので、これは [https://en.wikipedia.org/wiki/Legendre_symbol ルジャンドル記号] ''(x / p) = x<sup>(p-1)/2</sup> mod p'' が ''1'' であることに等しい<ref>secp256k1 曲線上の点 ''P'' は、''y(P)<sup>(p-1)/2</sup> &ne; 0 mod p'' となる。</ref>。
+
+
+
+==== Public Key Generation ====
+
+Input:
+* The secret key ''sk'': a 32-byte array, generated uniformly at random
+
+入力:
+* 秘密鍵 ''sk'': 32バイトのバイト列で、一様にランダムに生成される。
+
+The algorithm ''PubKey(sk)'' is defined as:
+* Let ''d = int(sk)''.
+* Fail if ''d = 0'' or ''d &ge; n''.
+* Return ''bytes(d⋅G)''.
+
+''PubKey(sk)'' は次のように定義される:
+* ''d = int(sk)'' とする。
+* ''d = 0'' または ''d &ge; n'' であれば失敗。
+* ''bytes(d⋅G)'' を返す。
+
+Note that we use a very different public key format (32 bytes) than the ones used by existing systems (which typically use elliptic curve points as public keys, or 33-byte or 65-byte encodings of them). A side effect is that ''PubKey(sk) = PubKey(bytes(n - int(sk))'', so every public key has two corresponding secret keys.
+
+我々は従来のシステム(典型的には、楕円曲線上の点を公開鍵としたり、それを 33バイトまたは 65バイトでエンコードする)で使われているものとはかなり異なる公開鍵フォーマット(32バイト)を使うことに注意。副作用として ''PubKey(sk) = PubKey(bytes(n - int(sk))'' が成り立つので、全ての公開鍵は二つの秘密鍵に対応する。
+
+As an alternative to generating keys randomly, it is also possible and safe to repurpose existing key generation algorithms for ECDSA in a compatible way. The secret keys constructed by such an algorithm can be used as ''sk'' directly. The public keys constructed by such an algorithm (assuming they use the 33-byte compressed encoding) need to be converted by dropping the first byte. Specifically, [[bip-0032.mediawiki|BIP32]] and schemes built on top of it remain usable.
+
+鍵をランダムに生成するのとは別の方法として、互換性のある ECDSA の鍵生成アルゴリズムを再利用しても安全である。このようなアルゴリズムで生成された秘密鍵は直接に ''sk'' として使える。同じようなアルゴリズムで生成された公開鍵(おそらく 33バイトの圧縮形式が使われている)は最初のバイトを捨てれて変換する必要がある。特に、[[bip-0032.mediawiki|BIP32]] やその上に構築したスキームも利用可能なままである。
+
+==== Default Signing ====
+
+Input:
+* The secret key ''sk'': a 32-byte array
+* The message ''m'': a 32-byte array
+
+入力:
+* 秘密鍵 ''sk'': 32バイトのバイト列
+* メッセージ ''m'': 32バイトのバイト列
+
+The algorithm ''Sign(sk, m)'' is defined as:
+* Let ''d' = int(sk)''
+* Fail if ''d' = 0'' or ''d' &ge; n''
+* Let ''P = d'⋅G''
+* Let ''d = d' '' if ''has_square_y(P)'', otherwise let ''d = n - d' ''.
+* Let ''rand = hash<sub>BIPSchnorrDerive</sub>(bytes(d) || m)''.
+* Let ''k' = int(rand) mod n''<ref>Note that in general, taking a uniformly random 256-bit integer modulo the curve order will produce an unacceptably biased result. However, for the secp256k1 curve, the order is sufficiently close to ''2<sup>256</sup>'' that this bias is not observable (''1 - n / 2<sup>256</sup>'' is around ''1.27 * 2<sup>-128</sup>'').</ref>.
+* Fail if ''k' = 0''.
+* Let ''R = k'⋅G''.
+* Let ''k = k' '' if ''has_square_y(R)'', otherwise let ''k = n - k' ''.
+* Let ''e = int(hash<sub>BIPSchnorr</sub>(bytes(R) || bytes(P) || m)) mod n''.
+* Return the signature ''bytes(R) || bytes((k + ed) mod n)''.
+
+''Sign(sk, m)'' アルゴリズムは次のように定義される:
+* ''d' = int(sk)'' とする。
+* ''d = 0'' または ''d &ge; n'' であれば失敗。
+* ''P = d'⋅G'' とする。
+* ''has_square_y(P)'' であれば ''d = d' '', そうでなければ ''d = n - d' '' とする。
+* ''rand = hash<sub>BIPSchnorrDerive</sub>(bytes(d) || m)'' とする。
+* ''k' = int(rand) mod n'' とする<ref>一般的には、曲線のオーダーを法とする 256ビット整数を一様なランダムで生成すると、許容できない偏った結果を生成することがある。しかし、secp256k1 曲線のオーダーは ''2<sup>256</sup>'' に非常に近いので、この偏りは起こりにくい(''1 - n / 2<sup>256</sup>'' で、およそ ''1.27 * 2<sup>-128</sup> 程度'')。</ref>。
+* ''k' = 0'' であれば失敗。
+* ''R = k'⋅G'' とする。
+* ''has_square_y(R)'' であれば ''k = k' '', そうでなければ ''k = n - k' '' とする。
+* ''e = int(hash<sub>BIPSchnorr</sub>(bytes(R) || bytes(P) || m)) mod n'' とする。
+* 署名 ''bytes(R) || bytes((k + ed) mod n)'' を返す。
+
+==== Alternative Signing ====
+
+It should be noted that various alternative signing algorithms can be used to produce equally valid signatures. The algorithm in the previous section is deterministic, i.e., it will always produce the same signature for a given message and secret key. This method does not need a random number generator (RNG) at signing time and is thus trivially robust against failures of RNGs. Alternatively the 32-byte ''rand'' value may be generated in other ways, producing a different but still valid signature (in other words, this is not a ''unique'' signature scheme). '''No matter which method is used to generate the ''rand'' value, the value must be a fresh uniformly random 32-byte string which is not even partially predictable for the attacker.'''
+
+同等の合法な署名を生成するのに様々な別の署名アルゴリズムがあることに注意すべきである。
+前節のアルゴリズムは決定的、つまり同一のメッセージと秘密鍵に対して常に同じ署名を生成する。この方法は署名時に乱数発生器(RNG)が不要なので、RNGs の失敗に対して特に何もせずとも頑強である。32バイトの ''乱数'' 値を生成するような別の方法だと、毎回異なるが合法である署名を生成する(別の言葉でいえば、これは ''ユニークな'' 署名手法ではない)。''' ''乱数'' 値を生成するためにどんな方法も用いたとしても、その値は攻撃者に予測されないような、一様にランダムで新鮮な 32byte 列でなければならない。'''
+
+'''Synthetic nonces''' For instance when a RNG is available, 32 bytes of RNG output can be appended to the input to ''hash<sub>BIPSchnorrDerive</sub>''. This will change the corresponding line in the signing algorithm to ''rand = hash<sub>BIPSchnorrDerive</sub>(bytes(d) || m || get_32_bytes_from_rng())'', where ''get_32_bytes_from_rng()'' is the call to the RNG. Adding RNG output may improve protection against [https://moderncrypto.org/mail-archive/curves/2017/000925.html fault injection attacks and side-channel attacks], and it is safe to add the output of a low-entropy RNG.
+
+'''対称的なナンス'''
+たとえばRNG が利用可能な場合、32バイトの RNG 出力を ''hash<sub>BIPSchnorrDerive</sub>'' の入力へ追加することができる。これは、署名アルゴリズムの対応する部分を ''rand = hash<sub>BIPSchnorrDerive</sub>(bytes(d) || m || get_32_bytes_from_rng())'' と変更する( ''get_32_bytes_from_rng()'' は RNG の呼び出し)。RNG 出力を追加することは [https://moderncrypto.org/mail-archive/curves/2017/000925.html fault injection attacks and side-channel attacks] への耐性を高める。なお、低エントロピーな RNG の出力を使っても安全である。
+
+
+'''Nonce exfiltration protection''' It is possible to strengthen the nonce generation algorithm using a second device. In this case, the second device contributes randomness which the actual signer provably incorporates into its nonce. This prevents certain attacks where the signer device is compromised and intentionally tries to leak the secret key through its nonce selection.
+
+'''ナンス抽出への防御''' 第二のデバイスを用いることで、ナンス生成のアルゴリズムを強化することができる。この場合、第二のデバイスは、実際の署名者が証明可能な形でそのナンスと合成する乱数値へと貢献する(?)。署名デバイスが妥協的で、ナンスの選択を通じて秘密鍵を意図的に漏洩するような攻撃を防ぐ。
+
+'''Multisignatures''' This signature scheme is compatible with various types of multisignature and threshold schemes such as [https://eprint.iacr.org/2018/068 MuSig], where a single public key requires holders of multiple secret keys to participate in signing (see Applications below).
+'''It is important to note that multisignature signing schemes in general are insecure with the ''rand'' generation from the default signing algorithm above (or any other deterministic method).'''
+
+'''マルチシグネチャ''' この署名方式は、[https://eprint.iacr.org/2018/068 MuSig] のような、単一の公開鍵に対して署名するのに複数人の秘密鍵保有者が参加しなければならない様々なタイプのマルチシグネチャ及び閾値スキームと互換性がある(下の「アプリケーション」参照)。
+'''一般的に、マルチシグネチャの署名スキームが ''乱数'' の生成を伴うと、上述のデフォルトの署名アルゴリズム(および他の決定的な手法)で安全でなくなることは重要である。'''
+
+
+==== Verification ====
+
+Input:
+* The public key ''pk'': a 32-byte array
+* The message ''m'': a 32-byte array
+* A signature ''sig'': a 64-byte array
+
+The algorithm ''Verify(pk, m, sig)'' is defined as:
+* Let ''P = point(pk)''; fail if ''point(pk)'' fails.
+* Let ''r = int(sig[0:32])''; fail if ''r &ge; p''.
+* Let ''s = int(sig[32:64])''; fail if ''s &ge; n''.
+* Let ''e = int(hash<sub>BIPSchnorr</sub>(bytes(r) || bytes(P) || m)) mod n''.
+* Let ''R = s⋅G - e⋅P''.
+* Fail if ''not has_square_y(R)'' or ''x(R) &ne; r''.
+* Return success iff no failure occurred before reaching this point.
+
+For every valid secret key ''sk'' and message ''m'', ''Verify(PubKey(sk),m,Sign(sk,m))'' will succeed.
+
+Note that the correctness of verification relies on the fact that ''point(pk)'' always returns a point with a square Y coordinate. A hypothetical verification algorithm that treats points as public keys, and takes the point ''P'' directly as input would fail any time a point with non-square Y is used. While it is possible to correct for this by negating points with non-square Y coordinate before further processing, this would result in a scheme where every (message, signature) pair is valid for two public keys (a type of malleability that exists for ECDSA as well, but we don't wish to retain). We avoid these problems by treating just the X coordinate as public key.
+
+==== Batch Verification ====
+
+Input:
+* The number ''u'' of signatures
+* The public keys ''pk<sub>1..u</sub>'': ''u'' 32-byte arrays
+* The messages ''m<sub>1..u</sub>'': ''u'' 32-byte arrays
+* The signatures ''sig<sub>1..u</sub>'': ''u'' 64-byte arrays
+
+The algorithm ''BatchVerify(pk<sub>1..u</sub>, m<sub>1..u</sub>, sig<sub>1..u</sub>)'' is defined as:
+* Generate ''u-1'' random integers ''a<sub>2...u</sub>'' in the range ''1...n-1''. They are generated deterministically using a [https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator CSPRNG] seeded by a cryptographic hash of all inputs of the algorithm, i.e. ''seed = seed_hash(pk<sub>1</sub>..pk<sub>u</sub> || m<sub>1</sub>..m<sub>u</sub> || sig<sub>1</sub>..sig<sub>u</sub> )''. A safe choice is to instantiate ''seed_hash'' with SHA256 and use [https://tools.ietf.org/html/rfc8439 ChaCha20] with key ''seed'' as a CSPRNG to generate 256-bit integers, skipping integers not in the range ''1...n-1''.
+* For ''i = 1 .. u'':
+** Let ''P<sub>i</sub> = point(pk<sub>i</sub>)''; fail if ''point(pk<sub>i</sub>)'' fails.
+** Let ''r<sub>i</sub> = int(sig<sub>i</sub>[0:32])''; fail if ''r<sub>i</sub> &ge; p''.
+** Let ''s<sub>i</sub> = int(sig<sub>i</sub>[32:64])''; fail if ''s<sub>i</sub> &ge; n''.
+** Let ''e<sub>i</sub> = int(hash<sub>BIPSchnorr</sub>(bytes(r<sub>i</sub>) || bytes(P<sub>i</sub>) || m<sub>i</sub>)) mod n''.
+** Let ''R<sub>i</sub> = lift_x(r<sub>i</sub>)''; fail if ''lift_x(r<sub>i</sub>)'' fails.
+* Fail if ''(s<sub>1</sub> + a<sub>2</sub>s<sub>2</sub> + ... + a<sub>u</sub>s<sub>u</sub>)⋅G &ne; R<sub>1</sub> + a<sub>2</sub>⋅R<sub>2</sub> + ... + a<sub>u</sub>⋅R<sub>u</sub> + e<sub>1</sub>⋅P<sub>1</sub> + (a<sub>2</sub>e<sub>2</sub>)⋅P<sub>2</sub> + ... + (a<sub>u</sub>e<sub>u</sub>)⋅P<sub>u</sub>''.
+* Return success iff no failure occurred before reaching this point.
+
+If all individual signatures are valid (i.e., ''Verify'' would return success for them), ''BatchVerify'' will always return success. If at least one signature is invalid, ''BatchVerify'' will return success with at most a negligible probability.
+
+=== Optimizations ===
+
+Many techniques are known for optimizing elliptic curve implementations. Several of them apply here, but are out of scope for this document. Two are listed below however, as they are relevant to the design decisions:
+
+'''Squareness testing''' The function ''is_square(x)'' is defined as above, but can be computed more efficiently using an [https://en.wikipedia.org/wiki/Jacobi_symbol#Calculating_the_Jacobi_symbol extended GCD algorithm].
+
+'''Jacobian coordinates''' Elliptic Curve operations can be implemented more efficiently by using [https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates Jacobian coordinates]. Elliptic Curve operations implemented this way avoid many intermediate modular inverses (which are computationally expensive), and the scheme proposed in this document is in fact designed to not need any inversions at all for verification. When operating on a point ''P'' with Jacobian coordinates ''(x,y,z)'' which is not the point at infinity and for which ''x(P)'' is defined as ''x / z<sup>2</sup>'' and ''y(P)'' is defined as ''y / z<sup>3</sup>'':
+* ''has_square_y(P)'' can be implemented as ''is_square(yz mod p)''.
+* ''x(P) &ne; r'' can be implemented as ''(0 &le; r < p) and (x &ne; z<sup>2</sup>r mod p)''.
+
+== Applications ==
+
+There are several interesting applications beyond simple signatures.
+While recent academic papers claim that they are also possible with ECDSA, consensus support for Schnorr signature verification would significantly simplify the constructions.
+
+=== Multisignatures and Threshold Signatures ===
+
+By means of an interactive scheme such as [https://eprint.iacr.org/2018/068 MuSig], participants can aggregate their public keys into a single public key which they can jointly sign for. This allows ''n''-of-''n'' multisignatures which, from a verifier's perspective, are no different from ordinary signatures, giving improved privacy and efficiency versus ''CHECKMULTISIG'' or other means.
+
+Moreover, Schnorr signatures are compatible with [https://web.archive.org/web/20031003232851/http://www.research.ibm.com/security/dkg.ps distributed key generation], which enables interactive threshold signatures schemes, e.g., the schemes described by [http://cacr.uwaterloo.ca/techreports/2001/corr2001-13.ps Stinson and Strobl (2001)] or [https://web.archive.org/web/20060911151529/http://theory.lcs.mit.edu/~stasio/Papers/gjkr03.pdf Genaro, Jarecki and Krawczyk (2003)]. These protocols make it possible to realize ''k''-of-''n'' threshold signatures, which ensure that any subset of size ''k'' of the set of ''n'' signers can sign but no subset of size less than ''k'' can produce a valid Schnorr signature. However, the practicality of the existing schemes is limited: most schemes in the literature have been proven secure only for the case ''k-1 < n/2'', are not secure when used concurrently in multiple sessions, or require a reliable broadcast mechanism to be secure. Further research is necessary to improve this situation.
+
+=== Adaptor Signatures ===
+
+[https://download.wpsoftware.net/bitcoin/wizardry/mw-slides/2018-05-18-l2/slides.pdf Adaptor signatures] can be produced by a signer by offsetting his public nonce with a known point ''T = t⋅G'', but not offsetting his secret nonce.
+A correct signature (or partial signature, as individual signers' contributions to a multisignature are called) on the same message with same nonce will then be equal to the adaptor signature offset by ''t'', meaning that learning ''t'' is equivalent to learning a correct signature.
+This can be used to enable atomic swaps or even [https://eprint.iacr.org/2018/472 general payment channels] in which the atomicity of disjoint transactions is ensured using the signatures themselves, rather than Bitcoin script support. The resulting transactions will appear to verifiers to be no different from ordinary single-signer transactions, except perhaps for the inclusion of locktime refund logic.
+
+Adaptor signatures, beyond the efficiency and privacy benefits of encoding script semantics into constant-sized signatures, have additional benefits over traditional hash-based payment channels. Specifically, the secret values ''t'' may be reblinded between hops, allowing long chains of transactions to be made atomic while even the participants cannot identify which transactions are part of the chain. Also, because the secret values are chosen at signing time, rather than key generation time, existing outputs may be repurposed for different applications without recourse to the blockchain, even multiple times.
+
+=== Blind Signatures ===
+
+A blind signature protocol is an interactive protocol that enables a signer to sign a message at the behest of another party without learning any information about the signed message or the signature. Schnorr signatures admit a very [https://www.math.uni-frankfurt.de/~dmst/research/papers/schnorr.blind_sigs_attack.2001.pdf simple blind signature scheme] which is however insecure because it's vulnerable to [https://www.iacr.org/archive/crypto2002/24420288/24420288.pdf Wagner's attack]. A known mitigation is to let the signer abort a signing session with a certain probability, and the resulting scheme can be [https://eprint.iacr.org/2019/877 proven secure under non-standard cryptographic assumptions].
+
+Blind Schnorr signatures could for example be used in [https://github.com/ElementsProject/scriptless-scripts/blob/master/md/partially-blind-swap.md Partially Blind Atomic Swaps], a construction to enable transferring of coins, mediated by an untrusted escrow agent, without connecting the transactors in the public blockchain transaction graph.
+
+== Test Vectors and Reference Code ==
+
+For development and testing purposes, we provide a [[bip-0340/test-vectors.csv|collection of test vectors in CSV format]] and a naive, highly inefficient, and non-constant time [[bip-0340/reference.py|pure Python 3.7 reference implementation of the signing and verification algorithm]].
+The reference implementation is for demonstration purposes only and not to be used in production environments.
+
+== Footnotes ==
+
+<references />
+
+== Acknowledgements ==
+
+This document is the result of many discussions around Schnorr based signatures over the years, and had input from Johnson Lau, Greg Maxwell, Andrew Poelstra, Rusty Russell, and Anthony Towns. The authors further wish to thank all those who provided valuable feedback and reviews, including the participants of the [https://github.com/ajtowns/taproot-review structured reviews].
