@@ -411,22 +411,38 @@ If all individual signatures are valid (i.e., ''Verify'' would return success fo
 
 Many techniques are known for optimizing elliptic curve implementations. Several of them apply here, but are out of scope for this document. Two are listed below however, as they are relevant to the design decisions:
 
+楕円曲線の実装の最適化には多くのテクニックが知られている。それらのいくつかはここで適用するが、本来はこの文書のスコープ範囲外である。しかしながら、下に列挙した二つは設計上の決定に関連しているものである:
+
 '''Squareness testing''' The function ''is_square(x)'' is defined as above, but can be computed more efficiently using an [https://en.wikipedia.org/wiki/Jacobi_symbol#Calculating_the_Jacobi_symbol extended GCD algorithm].
+
+'''平方剰余のテスト''' '''is_square(x)''' 関数は上で定義したが、[https://en.wikipedia.org/wiki/Jacobi_symbol#Calculating_the_Jacobi_symbol 拡張 GCD アルゴリズム] を用いればより効率的に計算できる。
 
 '''Jacobian coordinates''' Elliptic Curve operations can be implemented more efficiently by using [https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates Jacobian coordinates]. Elliptic Curve operations implemented this way avoid many intermediate modular inverses (which are computationally expensive), and the scheme proposed in this document is in fact designed to not need any inversions at all for verification. When operating on a point ''P'' with Jacobian coordinates ''(x,y,z)'' which is not the point at infinity and for which ''x(P)'' is defined as ''x / z<sup>2</sup>'' and ''y(P)'' is defined as ''y / z<sup>3</sup>'':
 * ''has_square_y(P)'' can be implemented as ''is_square(yz mod p)''.
 * ''x(P) &ne; r'' can be implemented as ''(0 &le; r < p) and (x &ne; z<sup>2</sup>r mod p)''.
+
+'''ヤコビ座標''' 楕円曲線の演算は [https://en.wikibooks.org/wiki/Cryptography/Prime_Curve/Jacobian_Coordinates ヤコビ座標] を用いればより効率的に実装できる。この方法で実装した楕円曲線演算は、計算途中に出てくる多くの(計算コストの高い)モジュラ逆数を避けられ、実際にこの文書で提案しているスキームでは検証計算に逆数を一切必要としないよう設計している。''x(P)'' を ''x / z<sup>2</sup>''、''y(P)'' を ''y / z<sup>3</sup>'' と定義した無限遠ではない点 ''P'' のヤコビ座標 ''(x,y,z)'' を演算する時は:
+* ''has_square_y(P)'' は ''is_square(yz mod p)'' として実装できる。
+* ''x(P) &ne; r'' は ''(0 &le; r < p) and (x &ne; z<sup>2</sup>r mod p)'' として実装できる。
 
 == アプリケーション ==
 
 There are several interesting applications beyond simple signatures.
 While recent academic papers claim that they are also possible with ECDSA, consensus support for Schnorr signature verification would significantly simplify the constructions.
 
+単なる署名を越えた様々な興味深いアプリケーションがある。
+最近の学術論文では、これらは ECDSA でも可能であると主張されているが、シュノア署名の検証をサポートしたコンセンサスは、それらの構築をかなり簡単にする。
+
 === マルチシグネチャと閾値署名 ===
 
 By means of an interactive scheme such as [https://eprint.iacr.org/2018/068 MuSig], participants can aggregate their public keys into a single public key which they can jointly sign for. This allows ''n''-of-''n'' multisignatures which, from a verifier's perspective, are no different from ordinary signatures, giving improved privacy and efficiency versus ''CHECKMULTISIG'' or other means.
 
+[https://eprint.iacr.org/2018/068 MuSig] のような対話的なスキームによって、参加者は彼らの公開鍵を集約して単一の公開鍵へ共同で署名することができる。これは ''n''-of-''n'' マルチシグネチャを可能とするた、検証者の観点からは通常の署名と違いは無く、''CHECKMULTISIG'' やその他の方法に比べてプライバシーと効率を改善する。
+
 Moreover, Schnorr signatures are compatible with [https://web.archive.org/web/20031003232851/http://www.research.ibm.com/security/dkg.ps distributed key generation], which enables interactive threshold signatures schemes, e.g., the schemes described by [http://cacr.uwaterloo.ca/techreports/2001/corr2001-13.ps Stinson and Strobl (2001)] or [https://web.archive.org/web/20060911151529/http://theory.lcs.mit.edu/~stasio/Papers/gjkr03.pdf Genaro, Jarecki and Krawczyk (2003)]. These protocols make it possible to realize ''k''-of-''n'' threshold signatures, which ensure that any subset of size ''k'' of the set of ''n'' signers can sign but no subset of size less than ''k'' can produce a valid Schnorr signature. However, the practicality of the existing schemes is limited: most schemes in the literature have been proven secure only for the case ''k-1 < n/2'', are not secure when used concurrently in multiple sessions, or require a reliable broadcast mechanism to be secure. Further research is necessary to improve this situation.
+
+さらに、シュノア署名は [https://web.archive.org/web/20031003232851/http://www.research.ibm.com/security/dkg.ps 分散鍵生成] と互換性があり、対話的な閾値署名スキームを可能にする。たとえば、[http://cacr.uwaterloo.ca/techreports/2001/corr2001-13.ps Stinson and Strobl (2001)] や [https://web.archive.org/web/20060911151529/http://theory.lcs.mit.edu/~stasio/Papers/gjkr03.pdf Genaro, Jarecki and Krawczyk (2003)].
+これらのプロトコルは、''n'' 人の署名者のうちのどの ''k'' 人でも署名できるが、''k'' より少ない署名者では正しいシュノア署名を作成できない、''k''-of-''n'' 閾値署名の実現を可能とする。しかしながら、実際には現在のスキームは限定的である: 文献上のほとんどのスキームは ''k-1 < n/2'' の場合にのみ安全性が証明されていなかったり、複数のセッションで同時に利用した時では安全ではなかったり、安全にするためには信頼できるブロードキャストメカニズムが必要だったりする。この状況を改善するには更なる研究が必要である。
 
 === Adaptor Signatures ===
 
@@ -434,18 +450,32 @@ Moreover, Schnorr signatures are compatible with [https://web.archive.org/web/20
 A correct signature (or partial signature, as individual signers' contributions to a multisignature are called) on the same message with same nonce will then be equal to the adaptor signature offset by ''t'', meaning that learning ''t'' is equivalent to learning a correct signature.
 This can be used to enable atomic swaps or even [https://eprint.iacr.org/2018/472 general payment channels] in which the atomicity of disjoint transactions is ensured using the signatures themselves, rather than Bitcoin script support. The resulting transactions will appear to verifiers to be no different from ordinary single-signer transactions, except perhaps for the inclusion of locktime refund logic.
 
+署名者は、彼の秘密のナンスは補正せず、公開なナンスに既知の点 ''T = t⋅G'' を補正することで [https://download.wpsoftware.net/bitcoin/wizardry/mw-slides/2018-05-18-l2/slides.pdf Adaptor signatures] を生成できる。
+同じナンスで同じメッセージに対する正しい署名(もしくは個々の署名者がマルチシグネチャを作る場合には部分的な署名)は ''t'' で補正された adaptor signature と同じになる。このことは、''t'' が分かれば正しい署名が分かることを意味する。
+アトミックスワップや、ビットコインスクリプトを越えてばらばらなトランザクションでの原子性が署名そのもので保証される [https://eprint.iacr.org/2018/472 general payment channels] でも利用される。結果としてできるトランザクションは、おそらく含まれる払い戻しロジックのロックタイムを除いて、通常の単一署名者によるトランザクションと違いは無い。
+
 Adaptor signatures, beyond the efficiency and privacy benefits of encoding script semantics into constant-sized signatures, have additional benefits over traditional hash-based payment channels. Specifically, the secret values ''t'' may be reblinded between hops, allowing long chains of transactions to be made atomic while even the participants cannot identify which transactions are part of the chain. Also, because the secret values are chosen at signing time, rather than key generation time, existing outputs may be repurposed for different applications without recourse to the blockchain, even multiple times.
+
+Adaptor signatures は、スクリプトセマンティクスを定数サイズの署名へエンコードすることによる効率とプライバシの利点を越え、伝統的なハッシュベースのペイメントチャネルに追加的な利益をもたらす。特に、秘密の値 ''t'' は中継点の間で再度生成すれば、長いトランザクションチェーンの参加者でもどのトランザクションがその一部であるかを同定できないのに原子的にすることができる。秘密の値は鍵の生成時ではなく署名時に選ばれるので、ブロックチェーンへ依頼すること無しに既存の出力を異なるアプリケーションへ何回でも再利用することもできる。
 
 === Blind Signatures ===
 
 A blind signature protocol is an interactive protocol that enables a signer to sign a message at the behest of another party without learning any information about the signed message or the signature. Schnorr signatures admit a very [https://www.math.uni-frankfurt.de/~dmst/research/papers/schnorr.blind_sigs_attack.2001.pdf simple blind signature scheme] which is however insecure because it's vulnerable to [https://www.iacr.org/archive/crypto2002/24420288/24420288.pdf Wagner's attack]. A known mitigation is to let the signer abort a signing session with a certain probability, and the resulting scheme can be [https://eprint.iacr.org/2019/877 proven secure under non-standard cryptographic assumptions].
 
+blind signature は、メッセージと署名の情報以外に何も知らないまま、他の参加者の要請によってメッセージへ署名することを可能にする対話的なプロトコルである。シュノア署名は、とても [https://www.math.uni-frankfurt.de/~dmst/research/papers/schnorr.blind_sigs_attack.2001.pdf 単純な blind signature スキーム] を含めることができるのだが、これは [https://www.iacr.org/archive/crypto2002/24420288/24420288.pdf Wagner's attack] に対して脆弱なので安全ではない。署名者は一定の確率で署名セッションを中断するという変更が知られていて、このスキーマは [https://eprint.iacr.org/2019/877 標準ではない暗号学的な仮定の下で安全であると証明]できる。
+ 
 Blind Schnorr signatures could for example be used in [https://github.com/ElementsProject/scriptless-scripts/blob/master/md/partially-blind-swap.md Partially Blind Atomic Swaps], a construction to enable transferring of coins, mediated by an untrusted escrow agent, without connecting the transactors in the public blockchain transaction graph.
+
+Blind シュノア署名は例えば、パブリックなブロックチェーンのトランザクショングラフに接続することなく、信頼できないエスクローエージェントを介してのコインの移動を可能とする [https://github.com/ElementsProject/scriptless-scripts/blob/master/md/partially-blind-swap.md Partially Blind Atomic Swaps] で使われている。
 
 == テストベクターとリファレンスコード ==
 
 For development and testing purposes, we provide a [[bip-0340/test-vectors.csv|collection of test vectors in CSV format]] and a naive, highly inefficient, and non-constant time [[bip-0340/reference.py|pure Python 3.7 reference implementation of the signing and verification algorithm]].
 The reference implementation is for demonstration purposes only and not to be used in production environments.
+
+開発とテストのために、
+[[bip-0340/test-vectors.csv|CSV 形式でのテストベクターのコレクション]] と、高度な効率化していないナイーブな、非定数時間の [[bip-0340/reference.py|pure 署名と検証アルゴリズムの Python 3.7 参照実装]] を提供する。
+この参照実装はデモ目的のみであり、プロダクション環境には使わないこと。
 
 == 脚注 ==
 
