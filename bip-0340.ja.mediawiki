@@ -118,7 +118,7 @@ To protect against these attacks, we choose ''key prefixed''<ref>A limitation of
 
 We note that key prefixing is not strictly necessary for transaction signatures as used in Bitcoin currently, because signed transactions indirectly commit to the public keys already, i.e., ''m'' contains a commitment to ''pk''. However, this indirect commitment should not be relied upon because it may change with proposals such as SIGHASH_NOINPUT ([[bip-0118.mediawiki|BIP118]]), and would render the signature scheme unsuitable for other purposes than signing transactions, e.g., [https://bitcoin.org/en/developer-reference#signmessage signing ordinary messages].
 
-現在のビットコインで使われているトランザクションの署名では、署名済トランザクションは既に間接的に公開鍵に紐付いている(たとえば、''m'' は ''pk'' を含んでいる)ので、 key prefixing が厳密に必要なわけではないことを注意しておく。しかしながら、SIGHASH_NOINPUT ([[bip-0118.mediawiki|BIP118]]) のような提案によって変わりうるので、この間接的な関与に信頼はおけない。
+現在のビットコインで使われているトランザクションの署名では、署名済トランザクションは既に間接的に公開鍵に紐付いている(すなわち ''m'' は ''pk'' を含んでいる)ので、 key prefixing が厳密に必要なわけではないことを注意しておく。しかしながら、SIGHASH_NOINPUT ([[bip-0118.mediawiki|BIP118]]) のような提案によって変わりうるので、この間接的な関与に信頼はおけない。
 
 
 '''Encoding R and public key point P''' There exist several possibilities for encoding elliptic curve points:
@@ -227,6 +227,19 @@ The following conventions are used, with constants as defined for [https://www.s
 ** 32バイト列 ''x'' に対する ''int(x)'' 関数は、x をビッグエンディアンバイト列とみなした 256ビットの符号無し整数を返す。
 ** 整数 ''x'' に対する ''is_square(x)'' 関数は、''x'' が ''p'' を法とする平方剰余かどうかを返す。''p'' は素数なので、これは [https://en.wikipedia.org/wiki/Legendre_symbol ルジャンドル記号] ''(x / p) = x<sup>(p-1)/2</sup> mod p'' が ''1'' であることに等しい<ref>secp256k1 曲線上の点 ''P'' は、''y(P)<sup>(p-1)/2</sup> &ne; 0 mod p'' となる。</ref>。
 
+** 点 ''P'' に対する''has_square_y(P)'' 関数は、''not is_infinite(P) and is_square(y(P))''<ref>secp256k1 曲線上の点 ''P'' が ''has_square_y(P) = not has_square_y(-P)'' となる場合。</ref>として定義される。
+** ''0..p-1'' の範囲内の整数 ''x'' に対する ''lift_x(x)'' 関数は、''x(P) = x'' <ref>
+ 与えられる X 座標の候補は範囲 ''0..p-1'' 内なので、正しい Y 座標はゼロ個か二個かである。正しい Y 座標が存在しない場合、''x'' もまた正しい X 座標ではない。すなわち、''x(P) = x'' となる点 ''P'' は存在しない。与えられた ''x'' に対する正しい Y 座標は ''c = x<sup>3</sup> + 7 mod p'' の平方根であり、存在するのならばこれは ''y = &plusmn;c<sup>(p+1)/4</sup> mod p'' で計算できる([https://en.wikipedia.org/wiki/Quadratic_residue#Prime_or_prime_power_modulus 平方剰余] を参照)。これは平方して c と比べることで確認できる。</ref>
+であり ''has_square_y(P)''<ref>
+ ''P := lift_x(x)'' が失敗とならないのは、''y := y(P) = c<sup>(p+1)/4</sup> mod p'' が平方剰余の場合のみである。証明: ''lift_x'' が失敗でないなら、''y'' は ''c'' の平方根なので、[https://en.wikipedia.org/wiki/Legendre_symbol ルジャンドル記号] ''(c / p)'' は ''c<sup>(p-1)/2</sup> = 1 mod p'' となる。なぜなら、ルジャンドル記号 ''(y / p)'' は ''y<sup>(p-1)/2</sup> mod p = c<sup>((p+1)/4)((p-1)/2)</sup> mod p = 1<sup>((p+1)/4)</sup> mod p = 1 mod p'' と展開でき、''y'' は平方であるから。
+</ref> である点 ''P'' を返す。このような点が存在しない場合は失敗とする。The function ''lift_x(x)'' is equivalent to the following pseudocode:
+*** ''c = x<sup>3</sup> + 7 mod p'' とする。
+*** ''y = c<sup>(p+1)/4</sup> mod p'' とする。
+*** ''c &ne; y<sup>2</sup> mod p'' であれば失敗。
+*** ''x(P) = x'' であり ''y(P) = y'' となるようなユニークな点 ''P'' を返す。このような点が存在しない場合は失敗。
+** 32 バイト配列 ''x'' に対する ''point(x)'' 関数は、点 ''P = lift_x(int(x))'' を返す。
+** UTF-8 のタグ名 ''tag'' とバイト配列 ''x'' に対する ''hash<sub>tag</sub>(x)'' は、32バイトのハッシュ値 ''SHA256(SHA256(tag) || SHA256(tag) || x)'' を返す。
+
 
 
 ==== Public Key Generation ====
@@ -296,7 +309,7 @@ The algorithm ''Sign(sk, m)'' is defined as:
 It should be noted that various alternative signing algorithms can be used to produce equally valid signatures. The algorithm in the previous section is deterministic, i.e., it will always produce the same signature for a given message and secret key. This method does not need a random number generator (RNG) at signing time and is thus trivially robust against failures of RNGs. Alternatively the 32-byte ''rand'' value may be generated in other ways, producing a different but still valid signature (in other words, this is not a ''unique'' signature scheme). '''No matter which method is used to generate the ''rand'' value, the value must be a fresh uniformly random 32-byte string which is not even partially predictable for the attacker.'''
 
 同等の合法な署名を生成するのに様々な別の署名アルゴリズムがあることに注意すべきである。
-前節のアルゴリズムは決定的、つまり同一のメッセージと秘密鍵に対して常に同じ署名を生成する。この方法は署名時に乱数発生器(RNG)が不要なので、RNGs の失敗に対して特に何もせずとも頑強である。32バイトの ''乱数'' 値を生成するような別の方法だと、毎回異なるが合法である署名を生成する(別の言葉でいえば、これは ''ユニークな'' 署名手法ではない)。''' ''乱数'' 値を生成するためにどんな方法も用いたとしても、その値は攻撃者に予測されないような、一様にランダムで新鮮な 32byte 列でなければならない。'''
+前節のアルゴリズムは決定的、すなわち同一のメッセージと秘密鍵に対して常に同じ署名を生成する。この方法は署名時に乱数発生器(RNG)が不要なので、RNGs の失敗に対して特に何もせずとも頑強である。32バイトの ''乱数'' 値を生成するような別の方法だと、毎回異なるが合法である署名を生成する(別の言葉でいえば、これは ''ユニークな'' 署名手法ではない)。''' ''乱数'' 値を生成するためにどんな方法も用いたとしても、その値は攻撃者に予測されないような、一様にランダムで新鮮な 32byte 列でなければならない。'''
 
 '''Synthetic nonces''' For instance when a RNG is available, 32 bytes of RNG output can be appended to the input to ''hash<sub>BIPSchnorrDerive</sub>''. This will change the corresponding line in the signing algorithm to ''rand = hash<sub>BIPSchnorrDerive</sub>(bytes(d) || m || get_32_bytes_from_rng())'', where ''get_32_bytes_from_rng()'' is the call to the RNG. Adding RNG output may improve protection against [https://moderncrypto.org/mail-archive/curves/2017/000925.html fault injection attacks and side-channel attacks], and it is safe to add the output of a low-entropy RNG.
 
@@ -322,6 +335,11 @@ Input:
 * The message ''m'': a 32-byte array
 * A signature ''sig'': a 64-byte array
 
+入力:
+* 公開鍵 'pk': 32バイト配列
+* メッセージ 'm': 32バイト配列
+* 署名 'sig': 64バイト配列
+
 The algorithm ''Verify(pk, m, sig)'' is defined as:
 * Let ''P = point(pk)''; fail if ''point(pk)'' fails.
 * Let ''r = int(sig[0:32])''; fail if ''r &ge; p''.
@@ -331,9 +349,25 @@ The algorithm ''Verify(pk, m, sig)'' is defined as:
 * Fail if ''not has_square_y(R)'' or ''x(R) &ne; r''.
 * Return success iff no failure occurred before reaching this point.
 
+アルゴリズム ''Verify(pk, m, sig)'' は以下のように定義される:
+* ''P = point(pk)'' とする。''point(pk)'' が失敗したら失敗。
+* ''r = int(sig[0:32])'' とする。''r &ge; p'' だったら失敗。
+* ''s = int(sig[32:64])'' とする。''s &ge; n'' だったら失敗。
+* ''e = int(hash<sub>BIPSchnorr</sub>(bytes(r) || bytes(P) || m)) mod n'' とする。
+* ''R = s⋅G - e⋅P'' とする。
+* ''not has_square_y(R)'' または ''x(R) &ne; r'' だったら失敗。
+* ここに至るまでに失敗しなかった場合のみ成功を返す。
+
 For every valid secret key ''sk'' and message ''m'', ''Verify(PubKey(sk),m,Sign(sk,m))'' will succeed.
 
+正しい秘密鍵 ''sk'' とメッセージ ''m'' の全てで、''Verify(PubKey(sk),m,Sign(sk,m))'' は成功する。
+
 Note that the correctness of verification relies on the fact that ''point(pk)'' always returns a point with a square Y coordinate. A hypothetical verification algorithm that treats points as public keys, and takes the point ''P'' directly as input would fail any time a point with non-square Y is used. While it is possible to correct for this by negating points with non-square Y coordinate before further processing, this would result in a scheme where every (message, signature) pair is valid for two public keys (a type of malleability that exists for ECDSA as well, but we don't wish to retain). We avoid these problems by treating just the X coordinate as public key.
+
+検証の正しさは、''point(pk)'' は常に Y 座標が平方剰余である点を返すことに依っていることに注意すること。
+点を公開鍵として扱うような検証アルゴリズムに点 ''P'' を直接入力してもらう場合、その点の Y が平方剰余でなかったら常に失敗することになる。
+このケースでは、以降の処理をする前に平方剰余でない Y 座標を負にすることで正しく適用することは可能であるが、こうすると全ての (メッセージ, 署名) ペアが二つの公開鍵で正当となってしまう(この種のマリアビリティは ECDSA でも存在するが、我々はそれが残ることを望まない)。我々は X 座標のみを公開鍵として扱うことで、この問題を避けた。
+
 
 ==== Batch Verification ====
 
@@ -342,6 +376,12 @@ Input:
 * The public keys ''pk<sub>1..u</sub>'': ''u'' 32-byte arrays
 * The messages ''m<sub>1..u</sub>'': ''u'' 32-byte arrays
 * The signatures ''sig<sub>1..u</sub>'': ''u'' 64-byte arrays
+
+入力:
+* 署名の数値 ''u''
+* 公開鍵 ''pk<sub>1..u</sub>'': ''u'' は 32 バイト配列
+* メッセージ ''m<sub>1..u</sub>'': ''u'' は 32 バイト配列
+* 署名 ''sig<sub>1..u</sub>'': ''u'' は 64 バイト配列
 
 The algorithm ''BatchVerify(pk<sub>1..u</sub>, m<sub>1..u</sub>, sig<sub>1..u</sub>)'' is defined as:
 * Generate ''u-1'' random integers ''a<sub>2...u</sub>'' in the range ''1...n-1''. They are generated deterministically using a [https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator CSPRNG] seeded by a cryptographic hash of all inputs of the algorithm, i.e. ''seed = seed_hash(pk<sub>1</sub>..pk<sub>u</sub> || m<sub>1</sub>..m<sub>u</sub> || sig<sub>1</sub>..sig<sub>u</sub> )''. A safe choice is to instantiate ''seed_hash'' with SHA256 and use [https://tools.ietf.org/html/rfc8439 ChaCha20] with key ''seed'' as a CSPRNG to generate 256-bit integers, skipping integers not in the range ''1...n-1''.
@@ -354,7 +394,21 @@ The algorithm ''BatchVerify(pk<sub>1..u</sub>, m<sub>1..u</sub>, sig<sub>1..u</s
 * Fail if ''(s<sub>1</sub> + a<sub>2</sub>s<sub>2</sub> + ... + a<sub>u</sub>s<sub>u</sub>)⋅G &ne; R<sub>1</sub> + a<sub>2</sub>⋅R<sub>2</sub> + ... + a<sub>u</sub>⋅R<sub>u</sub> + e<sub>1</sub>⋅P<sub>1</sub> + (a<sub>2</sub>e<sub>2</sub>)⋅P<sub>2</sub> + ... + (a<sub>u</sub>e<sub>u</sub>)⋅P<sub>u</sub>''.
 * Return success iff no failure occurred before reaching this point.
 
+アルゴリズム ''BatchVerify(pk<sub>1..u</sub>, m<sub>1..u</sub>, sig<sub>1..u</sub>)'' は以下のように定義される:
+* '''1...n-1'' の範囲内のランダムな整数を 'u-1'' 個生成し、''a<sub>2...u</sub>'' とする。このランダム整数の生成は、全ての入力値の暗号学的ハッシュ値をシードとした [https://en.wikipedia.org/wiki/Cryptographically_secure_pseudorandom_number_generator CSPRNG] を用いることで、決定的に行う。すなわち、''seed = seed_hash(pk<sub>1</sub>..pk<sub>u</sub> || m<sub>1</sub>..m<sub>u</sub> || sig<sub>1</sub>..sig<sub>u</sub> )'' とする。安全な選択としてはたとえば、SHA256 を ''seed_hash'' とし、''seed'' を 鍵とした [https://tools.ietf.org/html/rfc8439 ChaCha20] を CSPRNG として 256 ビット整数を生成 ('''1...n-1''' は飛ばす) することである。
+* ''i = 1 .. u'' で以下を繰り返す:
+** ''P<sub>i</sub> = point(pk<sub>i</sub>)'' とする。''point(pk<sub>i</sub>)'' が失敗したら失敗。
+** ''r<sub>i</sub> = int(sig<sub>i</sub>[0:32])'' とする。''r<sub>i</sub> &ge; p'' だったら失敗。
+** ''s<sub>i</sub> = int(sig<sub>i</sub>[32:64])'' とする。''s<sub>i</sub> &ge; n'' だったら失敗。
+** ''e<sub>i</sub> = int(hash<sub>BIPSchnorr</sub>(bytes(r<sub>i</sub>) || bytes(P<sub>i</sub>) || m<sub>i</sub>)) mod n'' とする。
+** ''R<sub>i</sub> = lift_x(r<sub>i</sub>)'' とする。''lift_x(r<sub>i</sub>)'' が失敗だったら失敗。
+* ''(s<sub>1</sub> + a<sub>2</sub>s<sub>2</sub> + ... + a<sub>u</sub>s<sub>u</sub>)⋅G &ne; R<sub>1</sub> + a<sub>2</sub>⋅R<sub>2</sub> + ... + a<sub>u</sub>⋅R<sub>u</sub> + e<sub>1</sub>⋅P<sub>1</sub> + (a<sub>2</sub>e<sub>2</sub>)⋅P<sub>2</sub> + ... + (a<sub>u</sub>e<sub>u</sub>)⋅P<sub>u</sub>'' だったら失敗。
+* ここに至るまでに失敗しなかった場合のみ成功を返す。
+
+
 If all individual signatures are valid (i.e., ''Verify'' would return success for them), ''BatchVerify'' will always return success. If at least one signature is invalid, ''BatchVerify'' will return success with at most a negligible probability.
+
+個々の署名全てが正しければ(すなわち、それぞれの ''Verify'' が成功すれば)、''BatchVerify'' は常に成功となる。少なくとも一つの署名が間違っていたら、''BatchVerify'' が成功を返すのは無視できる程度の可能性である。
 
 === Optimizations ===
 
